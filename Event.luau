@@ -25,9 +25,6 @@ local namedEvents = {}; -- stores ids of named events (so they can be retrieved 
 local connection;
 connection = {
 	new = function(attachedEventId: number, callback: (...any?) -> nil, id: number, once: boolean, ...): Connection
-
-		-- Connection constructor
-
 		local newConnection = setmetatable({
 			attachedEventId = attachedEventId,
 			id = id,
@@ -38,7 +35,6 @@ connection = {
 		}, connection);
 
 		return newConnection;
-
 	end,	
 };
 connection.__index = connection;
@@ -88,7 +84,6 @@ event = {
 		return found;
 	end,
 	new = function(name: string): Event -- Event Construction
-
 		-- Increase event counter
 		eventId += 1;
 
@@ -104,16 +99,13 @@ event = {
 		events[eventId] = newEvent;
 
 		if (name) then 
-
 			-- Preventing Overlapping Event names
 			if (namedEvents[name]) then error("Attempted to override event ", name) end;
 
 			namedEvents[name] = id;
-
 		end
 
 		return events[eventId];
-
 	end,	
 };
 event.__index = event;
@@ -123,18 +115,15 @@ function event:__call(...) -- When you call the event directly, it fires the eve
 end
 
 function event:ClearConnections() -- Clear all connections and free memory
-
 	self.connectionId = 0;
 
 	-- Disconnect and clear memory of connected tables
 	for _, connection in pairs(self.connected) do
 		connection:Disconnect();
 	end
-
 end
 
 function event:Destroy() -- Clear memory of connections and event
-
 	-- Remove event name from list
 	if (self.name) then 
 		rawset(namedEvents, self.name, nil);
@@ -163,7 +152,6 @@ function event:Fire(...) -- Signal all connected functions with passed parameter
 
 		connection:Signal(...);
 	end
-
 end
 
 function event:BindFire() -- To allow for the fire function to be passed as a callback
