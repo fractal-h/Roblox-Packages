@@ -1,0 +1,218 @@
+-- Typedef
+type Promise = {
+	status: string,
+	Then: ((...any?) -> nil, (...any?) -> nil) -> nil,
+	Finally: (...any?) -> nil,
+	Catch: (...any?) -> nil,
+	Reject: (...any?) -> nil,
+	Resolve: (...any?) -> nil,
+	Yield: (number) -> nil,
+	Close: () -> nil,
+	Attempt: ((...any?) -> ...any?, ...any?) -> nil,
+	ScheduleAttempt: ((...any?) -> ...any?, number, ...any?) -> nil,
+	Clear: () -> nil,
+}
+
+-- High Order Functions
+local function insertCallback(self, type, callback: (...any?) -> nil)
+	table.insert(self.callbacks, {type = type, callback = callback})
+end
+
+local function asynchronousSafeExecutor(promise: Promise, ...)
+	local routine = promise.routine
+	while true do
+		promise.yieldTime = math.max(promise.yieldTime - task.wait(), 0)
+		if promise.yieldTime > 0 then continue end
+
+		local success, result = coroutine.resume(routine, promise, ...)
+		if promise.status ~= "pending" then break end
+
+		if not success then
+			promise.status = "rejected"
+			for _, v in pairs(promise.callbacks) do
+				if v.type ~= "catch" and v.type ~= "finally" then continue end
+				task.spawn(v.callback, promise, result)
+			end
+			if promise.status == "rejected" then promise:Clear() end
+			break
+		end
+
+		if coroutine.status(routine) ~= "dead" then continue end
+		if success then
+			promise:Resolve(result)
+			break
+		end
+	end
+
+	task.wait()
+	coroutine.close(routine)
+end
+
+-- Promise
+local promise
+promise = {
+	all = function(promises: {Promise}): Promise
+		local resultPromise = promise.new()
+		local results, size = {}, #promises
+
+		local function handleSettle()
+			if size == 0 then
+				if #results < 0 then return resultPromise:Reject("None of the specified promises were accepted") end
+				return resultPromise:Resolve(results)
+			end
+		end
+
+		local finalize = function(winner, result)
+			size -= 1
+			if winner.status == "rejected" then return handleSettle() end
+			table.insert(results, result)
+			handleSettle()
+		end
+
+		for _, p in promises do p:Finally(finalize) end
+		return resultPromise
+	end,
+
+	allSettled = function(promises: {Promise}): Promise
+		local resultPromise = promise.new()
+		local results, size = {}, #promises
+
+		local function handleSettle()
+			if size == 0 then
+				if #results < 0 then return resultPromise:Reject("None of the specified promises were rejected or completed") end
+				return resultPromise:Resolve(results)
+			end
+		end
+
+		local finalize = function(winner, result)
+			size -= 1
+			table.insert(results, {status = winner.status, value = result})
+			handleSettle()
+		end
+
+		for _, p in promises do p:Finally(finalize) end
+		return resultPromise
+	end,
+
+	race = function(promises: {Promise}): Promise
+		local resultPromise = promise.new()
+		local winnerFound = false
+
+		local finalize = function(winner, result)
+			if winnerFound then return end
+			winnerFound = true
+			resultPromise:Resolve(result)
+		end
+
+		for _, p in promises do p:Finally(finalize) end
+		return resultPromise
+	end,
+
+	any = function(promises: {Promise}): Promise
+		local resultPromise = promise.new()
+		local winnerFound = false
+		local size = #promises
+
+		local finalize = function(winner, result)
+			size -= 1
+			if winner.status == "rejected" then
+				if size == 0 then resultPromise:Reject("None of the specified promises were accepted") end
+				return
+			end
+			if winnerFound then return end
+			winnerFound = true
+			resultPromise:Resolve(result)
+		end
+
+		for _, p in promises do p:Finally(finalize) end
+		return resultPromise
+	end,
+
+	new = function(callback: (...any?) -> ...any?, ...): Promise
+		local object = {
+			routine = callback and coroutine.create(callback) or nil,
+			yieldTime = 0,
+			callbacks = {},
+			status = "pending",
+		}
+		if callback then task.spawn(asynchronousSafeExecutor, object, ...) end
+		setmetatable(object, promise)
+		return object
+	end,
+}
+promise.__index = promise
+
+-- Memory Management
+function promise:Clear()
+	table.clear(self.callbacks)
+	setmetatable(self, nil)
+	self = nil
+end
+
+-- Initialization
+function promise:ScheduleAttempt(callback: (...any?) -> ...any?, delayTime: number, ...)
+	self.status = "pending"
+	self.routine = coroutine.create(callback)
+	self.yieldTime = delayTime
+	task.spawn(asynchronousSafeExecutor, self, ...)
+end
+
+function promise:Attempt(callback: (...any?) -> ...any?, ...)
+	self.status = "pending"
+	self.routine = coroutine.create(callback)
+	self.yieldTime = 0
+	task.spawn(asynchronousSafeExecutor, self, ...)
+end
+
+-- Resolution Handling
+function promise:Finalize(status: boolean, ...)
+	local ignoreType = status and "reject" or "resolve"
+	local preUpdateStatus = self.status
+	local oldRoutine = self.routine
+
+	task.wait()
+	for _, callback in pairs(self.callbacks) do
+		if callback.type == ignoreType or callback.type == "catch" then continue end
+		task.spawn(callback.callback, self, ...)
+	end
+
+	task.wait()
+	if preUpdateStatus == self.status then self:Clear() end
+end
+
+-- Resolution Cases
+function promise:Yield(length)
+	self.yieldTime += length
+	coroutine.yield()
+end
+
+function promise:Reject(...)
+	self.status = "rejected"
+	self:Finalize(false, ...)
+end
+
+function promise:Resolve(...)
+	self.status = "fulfilled"
+	self:Finalize(true, ...)
+end
+
+function promise:Cancel()
+	self.status = "rejected"
+	promise:Finalize(false, "Cancelled")
+end
+
+-- Resolution Callbacks
+function promise:Then(resolve: (...any?) -> nil, reject: (...any?) -> nil)
+	insertCallback(self, "resolve", resolve)
+	if reject then insertCallback(self, "reject", reject) end
+end
+
+function promise:Finally(callback: (...any?) -> nil)
+	insertCallback(self, "finally", callback)
+end
+
+function promise:Catch(callback: (...any?) -> nil)
+	insertCallback(self, "catch", callback)
+end
+
+return promise
