@@ -155,6 +155,8 @@ function promise:ScheduleAttempt(callback: (...any?) -> ...any?, delayTime: numb
 	self.routine = coroutine.create(callback)
 	self.yieldTime = delayTime
 	task.spawn(asynchronousSafeExecutor, self, ...)
+	
+	return self;
 end
 
 function promise:Attempt(callback: (...any?) -> ...any?, ...)
@@ -162,6 +164,8 @@ function promise:Attempt(callback: (...any?) -> ...any?, ...)
 	self.routine = coroutine.create(callback)
 	self.yieldTime = 0
 	task.spawn(asynchronousSafeExecutor, self, ...)
+	
+	return self;
 end
 
 -- Resolution Handling
@@ -177,23 +181,32 @@ function promise:Finalize(status: boolean, ...)
 	end
 
 	task.wait()
-	if preUpdateStatus == self.status then self:Clear() end
+	if preUpdateStatus == self.status then 
+		self:Clear(); 
+		return; 
+	end
 end
 
 -- Resolution Cases
 function promise:Yield(length)
 	self.yieldTime += length
 	coroutine.yield()
+	
+	return self;
 end
 
 function promise:Reject(...)
 	self.status = "rejected"
 	self:Finalize(false, ...)
+	
+	return self;
 end
 
 function promise:Resolve(...)
 	self.status = "fulfilled"
 	self:Finalize(true, ...)
+	
+	return self;
 end
 
 function promise:Cancel()
@@ -205,14 +218,20 @@ end
 function promise:Then(resolve: (...any?) -> nil, reject: (...any?) -> nil)
 	insertCallback(self, "resolve", resolve)
 	if reject then insertCallback(self, "reject", reject) end
+	
+	return self;
 end
 
 function promise:Finally(callback: (...any?) -> nil)
 	insertCallback(self, "finally", callback)
+	
+	return self;
 end
 
 function promise:Catch(callback: (...any?) -> nil)
 	insertCallback(self, "catch", callback)
+	
+	return self;
 end
 
 return promise
