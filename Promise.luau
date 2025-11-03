@@ -1,15 +1,15 @@
 -- Typedef
 type Promise = {
 	status: string,
-	Then: ((...any?) -> nil, (...any?) -> nil) -> nil,
-	Finally: (...any?) -> nil,
-	Catch: (...any?) -> nil,
-	Reject: (...any?) -> nil,
-	Resolve: (...any?) -> nil,
-	Yield: (number) -> nil,
+	Then: ((...any?) -> nil, (...any?) -> nil) -> Promise,
+	Finally: (...any?) -> Promise,
+	Catch: (...any?) -> Promise,
+	Reject: (...any?) -> Promise,
+	Resolve: (...any?) -> Promise,
+	Yield: (number) -> Promise,
 	Close: () -> nil,
-	Attempt: ((...any?) -> ...any?, ...any?) -> nil,
-	ScheduleAttempt: ((...any?) -> ...any?, number, ...any?) -> nil,
+	Attempt: ((...any?) -> ...any?, ...any?) -> Promise,
+	ScheduleAttempt: ((...any?) -> ...any?, number, ...any?) -> Promise,
 	Clear: () -> nil,
 }
 
