@@ -21,6 +21,15 @@ local eventId = 0; -- event id counter
 local events = {}; -- stores events
 local namedEvents = {}; -- stores ids of named events (so they can be retrieved by name)
 
+-- Helper function
+local function PackValues(params, ...)
+	local out = {...};
+	for _, v in params do 
+		out[_] = v;
+	end
+	return table.unpack(out);
+end
+
 -- CONNECTION
 local connection;
 connection = {
@@ -40,7 +49,7 @@ connection = {
 connection.__index = connection;
 
 function connection:Signal(...) -- Fire the connected function with stored values as well as the ones passed when signal was fired
-	task.spawn(self.callback, ..., table.unpack(self.passedParameters));
+	task.spawn(self.callback, PackValues(self.passedParameters, ...)); -- table.unpack(self.passedParameters)
 
 	if (self.once) then
 		self:Disconnect();
@@ -60,7 +69,7 @@ function connection:Disconnect() -- Disconnects connection from event and clears
 	setmetatable(self, nil);
 end
 
--- HIGH OPERATOR FUNCTIONS
+-- HIGH ORDER FUNCTIONS
 
 local function createConnection(self, callback, once, ...)
 	self.connectionId += 1;
@@ -75,11 +84,9 @@ local event;
 event = {
 	getEvent = function(identifier, waitTime: number) -- retrieve event based on name or id
 		local found = events[namedEvents[identifier]] or events[identifier];
-		if (not found) then 
-			if (waitTime) then 
-				local elapsed = 0;
-				repeat elapsed += task.wait() until (events[namedEvents[identifier]] or events[identifier]) or elapsed >= waitTime;
-			end
+		if (not found and waitTime) then 
+			local elapsed = 0;
+			repeat elapsed += task.wait() until (events[namedEvents[identifier]] or events[identifier]) or elapsed >= waitTime;
 		end
 		return found;
 	end,
