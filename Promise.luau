@@ -23,9 +23,9 @@ local function asynchronousSafeExecutor(promise: Promise, ...)
 	while true do
 		promise.yieldTime = math.max(promise.yieldTime - task.wait(), 0)
 		if promise.yieldTime > 0 then continue end
-		
-		if promise.status ~= "pending" then break end
+
 		local success, result = coroutine.resume(routine, promise, ...)
+		if promise.status ~= "pending" then break end
 
 		if not success then
 			promise.status = "rejected"
