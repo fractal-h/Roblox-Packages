@@ -338,11 +338,11 @@ MessagingService:SubscribeAsync(ServerActiveReceipt, ActivityCheckReceipt);
 
 -- BindToClose
 game:BindToClose(function()
-	GameShutDown = true;
 	for queueId, _ in OpenedQueues do 
 		InterserverQueueService.FreeServer(queueId, ServerID);
 		OpenedQueues[queueId] = nil;
 	end
+	GameShutDown = true;
 end)
 
 -- Return
