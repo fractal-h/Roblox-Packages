@@ -1,3 +1,9 @@
+--[[
+This is work and progress, started on 5/25/2026, maintained by one person.
+
+Known issues:
+	- Synchronous Dequeue / Requeue (Primarily with .Filter) can cause queue order mismatching. Looking for solution to read/write queue without fully deleting and rewriting it.
+]]
 -- Typedef
 export type OpenedQueueData = {
 	queue: MemoryStoreQueue, 
