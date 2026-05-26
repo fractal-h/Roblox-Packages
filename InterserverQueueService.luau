@@ -6,8 +6,8 @@ export type OpenedQueueData = {
 
 	DequeueEvent: BindableEvent
 };
-export type QueueData = {messageKey: string, data: {}};
-export type QueueMessage = {queueId: string, key: number, data: {}};
+export type QueueData = {messageKey: string, packet: {}};
+export type QueueMessage = {queueId: string, key: number, packet: {}};
 
 -- Services
 local MessagingService = game:GetService("MessagingService");
@@ -43,7 +43,7 @@ local DequeueListen = function(message: QueueMessage)
 
 	local queueId = message.queueId;
 	local key = message.key; 
-	local data = message.data;
+	local data = message.packet;
 
 	local queueData = InterserverQueueService.Open(queueId);
 	if (not queueData) then 
@@ -52,7 +52,7 @@ local DequeueListen = function(message: QueueMessage)
 	end
 
 	-- Removes item from queue 
-	queueData.DequeueEvent:Fire(data); -- key not provided because it has no relevance to packet outside RemoveAsync
+	queueData.DequeueEvent:Fire(unpack(data[1].packet)); -- key not provided because it has no relevance to packet outside RemoveAsync
 	queueData.queue:RemoveAsync(key);
 end
 
@@ -154,7 +154,7 @@ function InterserverQueueService.Enqueue(queueId: string, ...)
 	-- Set data 
 	local data = {
 		messageKey = ServerID,
-		data = packetContent
+		packet = packetContent
 	} :: QueueData;
 
 	-- Attempt to set async
@@ -183,7 +183,7 @@ function InterserverQueueService.Dequeue(queueId: string)
 
 	-- If server is current server skip next steps
 	if (foundData.messageKey == ServerID) then
-		DequeueListen({queueId = queueId, key = foundId, data = packet});
+		DequeueListen({queueId = queueId, key = foundId, packet = packet});
 		return true;
 	end
 
@@ -198,7 +198,7 @@ function InterserverQueueService.Dequeue(queueId: string)
 	end
 
 	-- Tell server that owns queue data point to dequeue 
-	MessagingService:PublishAsync(foundData.messageKey, {queueId = queueId, key = foundId, data = packet});
+	MessagingService:PublishAsync(foundData.messageKey, {queueId = queueId, key = foundId, packet = packet});
 
 	return true;
 end
