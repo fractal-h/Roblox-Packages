@@ -20,6 +20,7 @@ local DefaultQueueSize = math.pow(2, 4);
 local DefaultQueueExpirationTime = 60 * 60 * 24; -- One day in seconds
 local DefaultPingResponseTimeAllowance = 5; -- Must be whole integer 
 local GameShutDown = false;
+local ActiveRequests = 0;
 
 -- Messaging Keys
 local ServerID = "Server-" .. game.JobId;
@@ -37,6 +38,17 @@ local InterserverQueueService = {
 };
 InterserverQueueService.__index = InterserverQueueService;
 
+-- High Order Function
+local SendPacketRequest = function(callback, ...)
+	if (GameShutDown == true) then return false, "Attempt to send request after game closed" end;
+	
+	ActiveRequests += 1;
+	local results = table.pack(pcall(callback, ...));
+	ActiveRequests -= 1;
+	
+	return unpack(results);
+end
+
 -- Listeners
 local DequeueListen = function(message: QueueMessage)
 	if (GameShutDown) then return false end;
@@ -50,10 +62,12 @@ local DequeueListen = function(message: QueueMessage)
 		warn("Critical Error: Dequeue Message Listener could not open queue " .. queueId);
 		return 
 	end
+	
+	-- Delete packet
+	SendPacketRequest(queueData.queue.RemoveAsync, queueData.queue, key);
 
 	-- Removes item from queue 
 	queueData.DequeueEvent:Fire(unpack(data[1].packet)); -- key not provided because it has no relevance to packet outside RemoveAsync
-	queueData.queue:RemoveAsync(key);
 end
 
 local ActivityCheck = function(responseTarget: string)
@@ -69,17 +83,21 @@ local PingServer = function(serverId: string)
 	if (GameShutDown) then return false end;
 	if (ServerResponsePromise[serverId]) then return end;
 
+	-- Give server alloted time to respond
 	ServerResponsePromise[serverId] = DefaultPingResponseTimeAllowance;
 	while (ServerResponsePromise[serverId] ~= true) do
 		ActivityCheck("Activity-Check" .. serverId);
 		task.wait(1);
 		ServerResponsePromise[serverId] = math.max(ServerResponsePromise[serverId] - 1, 0);
 
+		-- Return false and clear memory if time expires
 		if (ServerResponsePromise[serverId] == 0) then 
+			ServerResponsePromise[serverId] = nil;
 			return false;
 		end
 	end
-
+	
+	-- Clear memory
 	ServerResponsePromise[serverId] = nil;
 
 	return true;
@@ -101,16 +119,16 @@ function Filter(packet: QueueData, filterValues: {}): boolean
 				filtersMet = false;
 				break;
 			end
-			
+
 			if (currentSet[key] ~= value) then 
 				filtersMet = false;
 				break; 
 			end
 		end
-		
+
 		-- If all filters met return true
 		if (filtersMet) then return true end;
-		
+
 		-- If values are not found, recursively check through all other tables contained in the packet
 		for key, value in currentSet do 
 			if (typeof(value) ~= "table") then continue end;
@@ -123,7 +141,6 @@ function Filter(packet: QueueData, filterValues: {}): boolean
 	-- Return
 	return FilterQueue(packet, filterValues);
 end
-
 -- Functions
 
 -- Recieves all items in queue
@@ -133,11 +150,13 @@ function InterserverQueueService.List(queueId: string): {QueueData}
 	if (not queueData) then return false end;
 
 	-- If there is no data existing return true
-	local queueSize = queueData.queue:GetSizeAsync();
-	if (queueSize == 0) then return {} end;
+	local queueSizeSuccess, queueSize = SendPacketRequest(queueData.queue.GetSizeAsync, queueData.queue);
+	assert(queueSizeSuccess, "Failure to get queue size, Error Message:\t" .. (tostring(queueSize) or "N/A"));
+
+	if (queueSize == 0) then return end;
 
 	-- Read data based on queue size
-	local success, list, readId = pcall(queueData.queue.ReadAsync, queueData.queue, queueSize, false, -1);
+	local success, list, readId = SendPacketRequest(queueData.queue.ReadAsync, queueData.queue, queueSize, false, DefaultPingResponseTimeAllowance);
 	assert(success, "Failure to read queue data, Error Message:\t" .. (tostring(list) or "N/A"));
 
 	return list, readId;
@@ -158,7 +177,7 @@ function InterserverQueueService.Enqueue(queueId: string, ...)
 	} :: QueueData;
 
 	-- Attempt to set async
-	local success, errorMsg = pcall(queueData.queue.AddAsync, queueData.queue, data, queueData.queueExpirationTime);
+	local success, errorMsg = SendPacketRequest(queueData.queue.AddAsync, queueData.queue, data, queueData.queueExpirationTime);
 
 	-- If request fails, return false
 	assert(success, "Attempt to enque data failed, error message:\t" .. (tostring(errorMsg or "N/A")));
@@ -173,10 +192,13 @@ function InterserverQueueService.Dequeue(queueId: string)
 	if (not queueData) then return false end;
 
 	-- Memory stored in FIFO format, getasync(1) should always (if not empty) return oldest item
-	local success, packet, foundId = pcall(queueData.queue.ReadAsync, queueData.queue, 1, false, -1);
-	local foundData = packet[1];
-
+	local success, packet, foundId = SendPacketRequest(queueData.queue.ReadAsync, queueData.queue, 1, false, 0);
+	assert(success, "Attempt to dequeue data failed, error message:\t" .. (tostring(packet) or "N/A"));
+	
+	if (not packet) then return false end;
+	
 	-- Return false if queue empty
+	local foundData = packet[1];
 	if (not foundData) then
 		return false;
 	end
@@ -213,7 +235,7 @@ function InterserverQueueService.Remove(queueId: string, key: string)
 	if (not queueData) then return false end;
 
 	-- Remove from queue
-	queueData.queue:RemoveAsync(key);
+	SendPacketRequest(queueData.queue.RemoveAsync, queueData.queue, key);
 end
 
 function InterserverQueueService.Filter(queueId: string, action: number, filterValues: {})
@@ -221,10 +243,13 @@ function InterserverQueueService.Filter(queueId: string, action: number, filterV
 
 	local queueData = InterserverQueueService.Open(queueId);
 	if (not queueData) then return false end;
-
+	
 	local list, readId = InterserverQueueService.List(queueId);
 	local packetBuffer = {};
 	local deletionRequired = false;
+	
+	-- Skip if queue empty
+	if (list == nil) then return true end;
 
 	for i, packet in ipairs(list) do
 		local filterMet = Filter(packet, filterValues);
@@ -254,11 +279,14 @@ function InterserverQueueService.Filter(queueId: string, action: number, filterV
 	if (not deletionRequired) then return true end;
 
 	-- Free packets associated with server
-	queueData.queue:RemoveAsync(readId);
+	SendPacketRequest(queueData.queue.RemoveAsync, queueData.queue, readId);
+
+	-- If all items are filtered out do not move on
+	if (#packetBuffer == 0) then return true end;
 
 	-- Write new data
 	for key, packet in ipairs(packetBuffer) do 
-		pcall(queueData.queue.AddAsync, queueData.queue, packet, queueData.queueExpirationTime);
+		SendPacketRequest(queueData.queue.AddAsync, queueData.queue, packet, queueData.queueExpirationTime);
 	end
 end
 
@@ -280,7 +308,7 @@ function InterserverQueueService.Open(queueId: string, queueSize: number?, expir
 	end
 
 	-- Open hash map instance
-	local success, queueData = pcall(MemoryStoreService.GetQueue, MemoryStoreService, queueId, DefaultPingResponseTimeAllowance);
+	local success, queueData = SendPacketRequest(MemoryStoreService.GetQueue, MemoryStoreService, queueId, DefaultPingResponseTimeAllowance);
 
 	-- Handle error
 	assert(success, queueId .. " was not found, error message:\t" .. (tostring(queueData or "N/A")));
@@ -306,11 +334,13 @@ function InterserverQueueService.Free(queueId: string)
 	end
 
 	-- If there is no data existing return true
-	local queueSize = queueData.queue:GetSizeAsync();
+	local queueSizeSuccess, queueSize = SendPacketRequest(queueData.queue.GetSizeAsync, queueData.queue);
+	assert(queueSizeSuccess, "Failure to get queue size, Error Message:\t" .. (tostring(queueSize) or "N/A"));
+
 	if (queueSize == 0) then return true end;
 
 	-- Recieve all data
-	local success, items, readId = pcall(queueData.queue.ReadAsync, queueData.queue, queueSize, false, -1);
+	local success, items, readId = SendPacketRequest(queueData.queue.ReadAsync, queueData.queue, queueSize, false, DefaultPingResponseTimeAllowance);
 
 	if (not success) then 
 		warn("Failed to read server data. Error message:\t" .. (tostring(items) or "N/A"))
@@ -318,7 +348,7 @@ function InterserverQueueService.Free(queueId: string)
 	end
 
 	-- Clear data
-	queueData.queue:RemoveAsync(readId);
+	SendPacketRequest(queueData.queue.RemoveAsync, queueData.queue, readId);
 
 	OpenedQueues[queueId].DequeueEvent:Destroy();
 
@@ -337,12 +367,30 @@ MessagingService:SubscribeAsync(ServerActive, ActivityCheck);
 MessagingService:SubscribeAsync(ServerActiveReceipt, ActivityCheckReceipt);
 
 -- BindToClose
+local function WaitForAllRequestsClosed()
+	local timeSpent = 0;
+	while (ActiveRequests > 0) do
+		timeSpent += task.wait();
+		if (timeSpent >= DefaultPingResponseTimeAllowance) then 
+			break;
+		end
+	end
+end
+
 game:BindToClose(function()
+	print("Freeing data associated with server");
+	WaitForAllRequestsClosed();
+	print("Existing requests closed, opening request to clear server data");
+	
 	for queueId, _ in OpenedQueues do 
-		InterserverQueueService.FreeServer(queueId, ServerID);
+		task.spawn(InterserverQueueService.FreeServer, queueId, ServerID);
 		OpenedQueues[queueId] = nil;
 	end
 	GameShutDown = true;
+	
+	print("Waiting for server data to be cleared");
+	WaitForAllRequestsClosed();
+	print("Server Closed")
 end)
 
 -- Return
