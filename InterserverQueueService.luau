@@ -324,7 +324,7 @@ end
 
 -- Frees all data points associated with the server specified
 function InterserverQueueService.FreeServer(queueId: string, serverId: string)
-	InterserverQueueService.Filter(queueId, InterserverQueueService.Enum.FilterAction.Remove, {messageKey = ServerID})
+	InterserverQueueService.Filter(queueId, InterserverQueueService.Enum.FilterAction.Remove, {messageKey = serverId})
 end
 
 -- Connections
