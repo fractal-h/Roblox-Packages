@@ -53,7 +53,7 @@ local DequeueListen = function(message: QueueMessage)
 	end
 
 	-- Removes item from queue 
-	queueData.DequeueEvent:Fire(key, data);
+	queueData.DequeueEvent:Fire(data); -- key not provided because it has no relevance to packet outside RemoveAsync
 	queueData.queue:RemoveAsync(key);
 end
 
@@ -178,8 +178,6 @@ function InterserverQueueService.Dequeue(queueId: string)
 		DequeueListen({queueId = queueId, key = foundId, data = packet});
 		return true;
 	end
-
-
 
 	-- Ping server, if there is no response within 5 seconds remove all queue data points associated with that server
 	local serverWaiting = PingServer(foundData.messageKey);
