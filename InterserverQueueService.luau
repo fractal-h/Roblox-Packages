@@ -22,7 +22,6 @@ local DefaultPingResponseTimeAllowance = 5; -- Must be whole integer
 local GameShutDown = false;
 
 -- Messaging Keys
-local Dequeue = "Dequeue";
 local ServerID = "Server-" .. game.JobId;
 local ServerActive = "Activity-Check" .. ServerID;
 local ServerActiveReceipt = "Acitivity-Check-Author" .. ServerID;
