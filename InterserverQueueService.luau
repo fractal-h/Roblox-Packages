@@ -96,13 +96,22 @@ function Filter(packet: QueueData, filterValues: {}): boolean
 		alreadySeen[currentSet] = true;
 
 		-- Check for values in table
+		local filtersMet = true;
 		for key, value in filterValues do 
-			if (not currentSet[key]) then continue end;	
-			if (currentSet[key] ~= value) then continue end;
-
-			return true;
+			if (currentSet[key] == nil) then 
+				filtersMet = false;
+				break;
+			end
+			
+			if (currentSet[key] ~= value) then 
+				filtersMet = false;
+				break; 
+			end
 		end
-
+		
+		-- If all filters met return true
+		if (filtersMet) then return true end;
+		
 		-- If values are not found, recursively check through all other tables contained in the packet
 		for key, value in currentSet do 
 			if (typeof(value) ~= "table") then continue end;
